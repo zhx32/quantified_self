@@ -1,0 +1,195 @@
+---
+title: "Quantified Self by Zhenghao Xiao"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(plotly)
+library(scales)
+library(flexdashboard)
+library(XML)
+library(reshape2)
+library(ggridges)
+library(viridis)
+
+setwd("~/Documents/R/512")
+
+
+xml <- xmlParse("export.xml")
+df <- XML:::xmlAttrsToDataFrame(xml["//Record"])
+
+df$value <- as.numeric(as.character(df$value))
+df$endDate <-ymd_hms(df$endDate,tz="America/New_York")
+df$month<-format(df$endDate,"%m")
+df$year<-format(df$endDate,"%Y")
+df$date<-format(df$endDate,"%Y-%m-%d")
+df$dayofweek <-wday(df$endDate, label=TRUE, abbr=FALSE)
+df$hour <-format(df$endDate,"%H")
+df1 <- unite(df, year_month, year, month)
+
+stepsbyday <- df1 %>%
+      filter(type == "HKQuantityTypeIdentifierStepCount") %>%
+      group_by(year_month, date) %>%
+      summarize(steps=sum(value)) 
+
+
+sleepfiles <- map("AutoSleep", paste, 1:6, sep = "") %>%
+      map(paste, ".csv", sep = "") %>%
+      unlist(.) %>%
+      map(read.csv, na.string = "--", stringsAsFactors = FALSE) 
+
+asleep_1 <- sleepfiles[[1]][, -c(6, 10, 11)]
+asleep_2 <- sleepfiles[[2]][, -c(6, 10, 11)]
+asleep_3 <- sleepfiles[[3]][, -c(6, 10, 11)]
+asleep_4 <- sleepfiles[[4]][, -c(6, 10, 11)]
+asleep_5 <- sleepfiles[[5]][, -c(6, 10, 11)]
+asleep_6 <- sleepfiles[[6]][, -c(6, 10, 11)]
+sleeplist <- list(asleep_1, asleep_2, asleep_3, asleep_4, asleep_5, asleep_6)
+asleep <- reduce(sleeplist, rbind)
+glimpse(asleep)
+asleep <- asleep[complete.cases(asleep),] 
+asleep1 <- asleep %>%   
+      mutate(day_of_week = as.Date(Until) %>% wday(label = TRUE),
+             time_hr = period_to_seconds(hm(Asleep)) / 3600,
+             quality_sleep_hr = period_to_seconds(hm(Quality.sleep)) / 3600,
+             date = ymd_hms(Until), 
+             day = day(date), 
+             month = month(date), 
+             year = year(date),
+             sleep_quality = quality_sleep_hr / time_hr * 100) %>%
+      select(date, year, month, day, day_of_week, time_hr, quality_sleep_hr, sleep_quality) 
+
+asleep2 <- asleep1 %>%
+      unite(year_month, year, month)
+
+study_time <- read_csv("daily_study_time.csv")     
+study_time <- study_time %>%
+      mutate(date = mdy(study_time$Date), 
+             study_hr = Hours + Minutes / 60) %>%
+      select(date, study_hr)
+```
+
+Overview {data-orientation=rows, data-width=500}
+=====================================================================
+Quantified self {data-width=650}
+-----------------------------------------------------------------------
+### Quantified self
+
+My journey of quantified self was just started a month ago, I decided to mark down the time I spent on learning and study everyday. I did it by using the stopwatch on my iPhone: when I started learning, hit the start button, if I needed to do something other than study, hit the stop button. Before I got to sleep, record the time on the stopwatch into a spreedsheet. I hope that can drive me to keep the learning steps on my way of pursuing new knowledge. 
+
+In addition of active self quantifying, I've been passively quantifying myself by apple watch for more than a year. The data collected by apple watch is health data including sleeping, workout, heartrates, and step counts. In this dashboard, sleep time and step counts are took into analysis.
+
+By analyzing and visualizing these data, I would like to answer the following quesitons:
+
+      1. What is the longest and the average daily study time?
+      
+      2. What is the median monthly step counts?
+      
+      3. In which month I slept the least?
+      
+      4. Is there any connection between the sleep time and the sleep quality?
+      
+      5. Is there any pattern in daily sleep time?
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Daily study time{data-height=200}
+
+```{r}
+mean_study_hr <- mean(study_time$study_hr)
+valueBox(round(mean_study_hr, digits = 2),
+         caption = "Average Daily Study Time(hours)",
+         icon = "fa-book")
+```
+
+### Bar chart of daily study time
+
+```{r}
+plot_ly(study_time, x = ~date, y = ~study_hr, type = "bar") %>%
+      layout(title = "Daily Study Time", yaxis = list(title = "Hours"), xaxis = list(title = "Date"))
+```
+
+
+Steps {data-orientation=rows}
+====================================================
+
+
+Explains {data-height=150}
+-----------------------------------------------------------------------
+### About Steps
+The left plot is the monthly step counts in box plot form, from which we can check the median, quantile, maximum and minimum steps in a single day. The highest point shows that in one day of November 2018, my maximum step counts is 47000. 
+The right graph is the weekly step counts heat map. It indicates I was most active during the noon of Monday and Tuesday. It may because Monday and Tuesday was my gym day.
+ 
+Graphs {data-height=850}
+-----------------------------------------------------------------------
+
+### Monthly step counts data
+
+```{r}
+plot_ly(stepsbyday, y = ~steps, color = ~year_month, type = "box") %>%
+      layout(title = "Daily Steps by Month", yaxis = list(title = "Steps"), xaxis = list(title = "Year_Month"))
+```
+
+### Weekly step counts data
+
+```{r}
+plot1 <- df %>%
+      filter(type == 'HKQuantityTypeIdentifierStepCount') %>%
+      group_by(dayofweek,hour) %>%
+      summarize(steps=sum(value)) %>%
+      ggplot(aes(dayofweek, hour, fill = steps)) + 
+      geom_tile() +
+      scale_fill_continuous(labels = scales::comma, low = 'lightgoldenrod', high = 'lightgoldenrod4') 
+ggplotly(plot1)
+```
+
+
+Sleep time and quality {.storyboard}
+====================================================
+### Daily sleep time by months from Jan 2018 to Apr 2019
+```{r}
+plot_ly(asleep2, y = ~time_hr, color = ~year_month, type = "box") %>%
+      layout(title = "Daily Sleep Time", yaxis = list(title = "Hours"), xaxis = list(title = "year_month"))
+```
+
+***
+My average monthly sleep time is between 6 to 8 hours, but there are many outliers under 4 hours. It may because of my procrastination which is always breaking out near the deadline. I guess I need to plan my life more visionary.
+
+### Connections between sleep time and sleep quality 
+```{r}
+plot2 <- ggplot(asleep1, aes(x = time_hr, y = sleep_quality, color = day_of_week)) +
+      geom_point(position = "jitter") +
+      geom_smooth(aes(group = 1)) +
+       labs(title = "Sleep quality versus sleep time",
+           x = "Time spent sleeping (hr)",
+           y = "Sleep quality")
+ggplotly(plot2)
+```
+
+***
+As the plot shows, there is basically no relation between the sleep quality and sleep time. I defined the sleep quality as a percentage of quality sleep time versus totaly sleep time per day. I was expecting the sleep quality is of a positive relationship with the sleep time. But it is not. This is just the interesting thing about exploratory data analysis, you may achieve some findings from some point you did not expected of. I may dig into that more exhaustively in future analysis.
+
+###Week view of daily sleep time
+```{r}
+asleep1 %>% 
+      ggplot(aes(x = time_hr, y = day_of_week, fill = ..x..)) +
+      geom_density_ridges_gradient(scale = 3) +
+      scale_x_continuous(expand = c(0.01, 0),
+                         breaks= seq(0,12,4)) +
+      scale_y_discrete(expand = c(0.01, 0)) +
+      scale_fill_viridis(name = "Hours", option = "C") +
+      labs(title = "Duration of Sleep",
+           x = "Time spent sleeping (hr)") + 
+      theme_ridges(font_size = 13, grid = TRUE) + theme(axis.title.y = element_blank()) 
+```
+
+***
+This is a ridge plot of sleep duration grouped by days of a week. From this plot, we can see that the average sleep time of Saturday is about an hour higher than other weekdays. I guess more than 50% people of the world may act like that, after a 5-day-working-streak, people would always like to sleep a little more in Saturday. 
+Another finding is that both Friday and Monday are bimodal. That is because my weekly routine: I always take Bus on Friday and Monday morning to travel between my home and my girlfriends' home. That pattern is captured precisely by my watch.
